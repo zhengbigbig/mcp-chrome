@@ -1230,6 +1230,21 @@ export const App: React.FC = () => {
       </div>
 
       <div className="footer">
+        <div className="footer-actions">
+          <button
+            className="sidepanel-button"
+            onClick={() => {
+              chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL' }, (response) => {
+                if (!response?.success) {
+                  console.error('Failed to open sidepanel:', response?.error);
+                }
+              });
+            }}
+          >
+            <span>🤖</span>
+            <span>打开MCP客户端</span>
+          </button>
+        </div>
         <p className="footer-text">chrome mcp server for ai</p>
       </div>
 

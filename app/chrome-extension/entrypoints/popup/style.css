@@ -1238,6 +1238,33 @@ select:focus {
   margin-top: auto;
 }
 
+.footer-actions {
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.sidepanel-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #059669;
+  color: white;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.sidepanel-button:hover {
+  background: #047857;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
 .footer-text {
   text-align: center;
   font-size: 12px;

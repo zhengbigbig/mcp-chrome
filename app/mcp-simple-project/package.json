@@ -1,0 +1,37 @@
+{
+  "name": "mcp-simple-project",
+  "version": "1.0.0",
+  "description": "一个简单的 MCP server 和 client 项目，使用 Ollama deepseek-r1:1.5b 模型",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts client",
+    "server": "ts-node src/index.ts server",
+    "client": "ts-node src/index.ts client",
+    "test-ollama": "ts-node src/index.ts test-ollama",
+    "debug-ui": "vite",
+    "build-ui": "vite build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.3",
+    "axios": "^1.11.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^5.0.1",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
+}

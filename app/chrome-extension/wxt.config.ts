@@ -2,6 +2,7 @@ import { defineConfig } from 'wxt';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { config } from 'dotenv';
 import { resolve } from 'path';
+import { homedir } from 'os';
 
 config({ path: resolve(process.cwd(), '.env') });
 config({ path: resolve(process.cwd(), '.env.local') });
@@ -10,11 +11,10 @@ const CHROME_EXTENSION_KEY = process.env.CHROME_EXTENSION_KEY;
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
-  modules: ['@wxt-dev/module-vue'],
+  modules: ['@wxt-dev/module-react'],
   runner: {
     // 方案1: 禁用自动启动（推荐）
-    disabled: true,
-
+    // disabled: true,
     // 方案2: 如果要启用自动启动并使用现有配置，取消注释下面的配置
     // chromiumArgs: [
     //   '--user-data-dir=' + homedir() + (process.platform === 'darwin'

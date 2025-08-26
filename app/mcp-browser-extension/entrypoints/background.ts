@@ -1,22 +1,57 @@
-// Background Script - MCP Server 实现
-// 在浏览器插件的 background 上下文中实现 MCP Server 功能
+// Background Script - 真正的 MCP Server 实现
+// 使用 @modelcontextprotocol/sdk 在浏览器插件中实现标准 MCP Server
 
-import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  Tool,
+  CallToolResult,
+  ListToolsResult,
+} from '@modelcontextprotocol/sdk/types.js';
 
-// MCP Tool 定义
-interface MCPTool {
-  name: string;
-  description: string;
-  inputSchema: {
-    type: string;
-    properties: Record<string, any>;
-    required?: string[];
-  };
+// 浏览器 MCP Transport 实现
+class BrowserMCPTransport {
+  private messageHandlers: Map<string, (message: any) => Promise<any>> = new Map();
+
+  constructor() {
+    // 监听来自其他部分的消息
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.type && message.type.startsWith('MCP_')) {
+        this.handleMessage(message).then(response => {
+          sendResponse(response);
+        }).catch(error => {
+          sendResponse({ error: error.message });
+        });
+        return true; // 保持消息通道开放
+      }
+    });
+  }
+
+  private async handleMessage(message: any): Promise<any> {
+    const handler = this.messageHandlers.get(message.type);
+    if (handler) {
+      return await handler(message);
+    }
+    throw new Error(`Unknown message type: ${message.type}`);
+  }
+
+  onMessage(type: string, handler: (message: any) => Promise<any>) {
+    this.messageHandlers.set(type, handler);
+  }
+
+  sendMessage(type: string, data: any): Promise<any> {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type, ...data }, resolve);
+    });
+  }
 }
 
-// MCP Server 实现
+// 真正的 MCP Server 实现
 class BrowserMCPServer {
-  private tools: MCPTool[] = [
+  private server: Server;
+  private transport: BrowserMCPTransport;
+  private tools: Tool[] = [
     {
       name: 'echo',
       description: '回显输入的文本',
@@ -30,7 +65,7 @@ class BrowserMCPServer {
         },
         required: ['text'],
       },
-    },
+    } as Tool,
     {
       name: 'calculate',
       description: '执行简单的数学计算',
@@ -44,7 +79,7 @@ class BrowserMCPServer {
         },
         required: ['expression'],
       },
-    },
+    } as Tool,
     {
       name: 'get_time',
       description: '获取当前时间',
@@ -52,7 +87,7 @@ class BrowserMCPServer {
         type: 'object',
         properties: {},
       },
-    },
+    } as Tool,
     {
       name: 'get_page_info',
       description: '获取当前页面信息（浏览器插件特有功能）',
@@ -60,7 +95,7 @@ class BrowserMCPServer {
         type: 'object',
         properties: {},
       },
-    },
+    } as Tool,
     {
       name: 'scroll_page',
       description: '滚动页面（浏览器插件特有功能）',
@@ -74,16 +109,72 @@ class BrowserMCPServer {
         },
         required: ['direction'],
       },
-    },
+    } as Tool,
   ];
 
-  // 获取工具列表
-  getTools(): MCPTool[] {
+  constructor() {
+    this.transport = new BrowserMCPTransport();
+    this.server = new Server(
+      {
+        name: 'mcp-browser-extension-server',
+        version: '1.0.0',
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      }
+    );
+
+    this.setupToolHandlers();
+    this.setupTransport();
+  }
+
+  private setupTransport() {
+    // 将 MCP 协议消息路由到真正的 MCP Server
+    this.transport.onMessage('MCP_LIST_TOOLS', async () => {
+      return await this.server.request(
+        { method: 'tools/list' },
+        ListToolsRequestSchema
+      );
+    });
+
+    this.transport.onMessage('MCP_CALL_TOOL', async (message) => {
+      return await this.server.request(
+        { 
+          method: 'tools/call', 
+          params: { 
+            name: message.name, 
+            arguments: message.args 
+          } 
+        },
+        CallToolRequestSchema
+      );
+    });
+  }
+
+  private setupToolHandlers() {
+    // 设置工具列表处理器
+    this.server.setRequestHandler(ListToolsRequestSchema, async (): Promise<ListToolsResult> => {
+      return {
+        tools: this.tools,
+      };
+    });
+
+    // 设置工具调用处理器
+    this.server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
+      const { name, arguments: args } = request.params;
+      return await this.callTool(name, args);
+    });
+  }
+
+  // 获取工具列表（兼容旧接口）
+  getTools(): Tool[] {
     return this.tools;
   }
 
-  // 调用工具
-  async callTool(name: string, args: any = {}): Promise<{ content: Array<{ type: string; text: string }> }> {
+  // 调用工具 - 返回标准 MCP CallToolResult
+  async callTool(name: string, args: any = {}): Promise<CallToolResult> {
     try {
       switch (name) {
         case 'echo':
@@ -253,6 +344,53 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: a
       sendResponse({ 
         success: false, 
         error: error instanceof Error ? error.message : '未知错误' 
+      });
+    });
+    
+    return true; // 保持消息通道开放
+  }
+
+  // 获取可用模型列表
+  if (message.type === 'OLLAMA_LIST_MODELS') {
+    console.log('[Background] 获取 Ollama 模型列表');
+    
+    fetch('http://localhost:11434/api/tags', {
+      method: 'GET',
+    })
+    .then(async response => {
+      const responseText = await response.text();
+      console.log('[Background] 模型列表响应:', responseText);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${responseText}`);
+      }
+      
+      try {
+        const result = JSON.parse(responseText);
+        const models = result.models || [];
+        sendResponse({ 
+          success: true, 
+          models: models.map((model: any) => ({
+            name: model.name,
+            size: model.size,
+            modified_at: model.modified_at,
+            parameter_size: model.details?.parameter_size || 'Unknown',
+            family: model.details?.family || 'Unknown'
+          }))
+        });
+      } catch (parseError) {
+        console.error('[Background] 模型列表解析失败:', parseError);
+        sendResponse({ 
+          success: false, 
+          error: `JSON 解析失败: ${parseError instanceof Error ? parseError.message : parseError}` 
+        });
+      }
+    })
+    .catch(error => {
+      console.error('[Background] 获取模型列表失败:', error);
+      sendResponse({ 
+        success: false, 
+        error: error instanceof Error ? error.message : '获取模型列表失败' 
       });
     });
     

@@ -1,10 +1,4 @@
-import { initNativeHostListener } from './native-host';
-import {
-  initSemanticSimilarityListener,
-  initializeSemanticEngineIfCached,
-} from './semantic-similarity';
-import { initStorageManagerListener } from './storage-manager';
-import { cleanupModelCache } from '@/utils/semantic-similarity-engine';
+// 清理后的导入 - 移除已废弃的服务
 import { handleCallTool } from './tools';
 import { internalMCPServer } from './mcp-internal-server';
 
@@ -15,10 +9,10 @@ async function handleMCPRequest(mcpRequest: any): Promise<any> {
   try {
     // 使用 Internal MCP Server 的传输层处理请求
     const transport = internalMCPServer.getTransport();
-    
+
     // 通过内部传输层发送请求并获取响应
     const response = await transport.sendRequest(mcpRequest.method, mcpRequest.params);
-    
+
     return {
       jsonrpc: '2.0',
       id: mcpRequest.id,
@@ -50,37 +44,16 @@ export default defineBackground(() => {
     console.log('[Background] Internal MCP Server 启动中...');
   }
 
-  // Initialize core services
-  initNativeHostListener();
-  initSemanticSimilarityListener();
-  initStorageManagerListener();
-
-  // Conditionally initialize semantic similarity engine if model cache exists
-  initializeSemanticEngineIfCached()
-    .then((initialized) => {
-      if (initialized) {
-        console.log('Background: Semantic similarity engine initialized from cache');
-      } else {
-        console.log(
-          'Background: Semantic similarity engine initialization skipped (no cache found)',
-        );
-      }
-    })
-    .catch((error) => {
-      console.warn('Background: Failed to conditionally initialize semantic engine:', error);
-    });
-
-  // Initial cleanup on startup
-  cleanupModelCache().catch((error) => {
-    console.warn('Background: Initial cache cleanup failed:', error);
-  });
+  // Initialize core services - 清理后的服务初始化
+  console.log('[Background] 核心服务已简化，专注于MCP服务器功能');
 
   // Setup extension installation handler
   chrome.runtime.onInstalled.addListener(() => {
     console.log('[Background] 插件已安装/更新');
-    
+
     // 设置侧边栏默认行为：点击插件图标时打开侧边栏
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
+    chrome.sidePanel
+      .setPanelBehavior({ openPanelOnActionClick: true })
       .then(() => {
         console.log('[Background] 已设置点击插件图标自动打开侧边栏');
       })
@@ -142,7 +115,10 @@ export default defineBackground(() => {
         sendResponse({ success: true, tools });
       } catch (error) {
         console.error('Get tools failed:', error);
-        sendResponse({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
       }
       return false;
     }
@@ -154,7 +130,10 @@ export default defineBackground(() => {
         sendResponse({ success: true, tools });
       } catch (error) {
         console.error('List tools failed:', error);
-        sendResponse({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
       }
       return false;
     }
@@ -168,7 +147,10 @@ export default defineBackground(() => {
         })
         .catch((error) => {
           console.error('Call tool failed:', error);
-          sendResponse({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+          sendResponse({
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
         });
       return true; // Keep message channel open for async response
     }

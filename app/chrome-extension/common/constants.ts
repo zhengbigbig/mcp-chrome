@@ -30,8 +30,7 @@ export const LIMITS = {
   MAX_SEARCH_RESULTS: 50,
   MAX_BOOKMARK_RESULTS: 100,
   MAX_HISTORY_RESULTS: 100,
-  SIMILARITY_THRESHOLD: 0.1,
-  VECTOR_DIMENSIONS: 384,
+  // 语义搜索相关配置已移除
 } as const;
 
 // Error Messages
@@ -87,21 +86,13 @@ export const NETWORK_FILTERS = {
   STATIC_RESOURCE_TYPES: ['stylesheet', 'image', 'font', 'media', 'other'],
 } as const;
 
-// Semantic Similarity Configuration
-export const SEMANTIC_CONFIG = {
-  DEFAULT_MODEL: 'sentence-transformers/all-MiniLM-L6-v2',
-  CHUNK_SIZE: 512,
-  CHUNK_OVERLAP: 50,
-  BATCH_SIZE: 32,
-  CACHE_SIZE: 1000,
-} as const;
+// 语义搜索配置已移除
 
 // Storage Keys
 export const STORAGE_KEYS = {
   SERVER_STATUS: 'serverStatus',
-  SEMANTIC_MODEL: 'selectedModel',
   USER_PREFERENCES: 'userPreferences',
-  VECTOR_INDEX: 'vectorIndex',
+  // 语义搜索相关存储键已移除
 } as const;
 
 // Notification Configuration

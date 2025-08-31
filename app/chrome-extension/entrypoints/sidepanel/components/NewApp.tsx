@@ -1,8 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { EnhancedReasoningEngine, ReasoningStepType, ReasoningResult } from '../services/EnhancedReasoningEngine';
+import {
+  EnhancedReasoningEngine,
+  ReasoningStepType,
+  ReasoningResult,
+} from '../services/EnhancedReasoningEngine';
 import { TaskAnalysis } from '../services/PromptSystem';
 import { UserInteraction, InteractionResult } from '../../../utils/mcp/user-interaction';
 import { SimpleMCPHelper, SimpleTool } from '../utils/SimpleMCPHelper';
+import { ExternalMCPConfig } from './ExternalMCPConfig';
 
 interface Message {
   id: string;
@@ -32,6 +37,7 @@ const NewApp: React.FC = () => {
   const [availableTools, setAvailableTools] = useState<SimpleTool[]>([]);
   const [pendingConfirmation, setPendingConfirmation] = useState<TaskAnalysis | null>(null);
   const [reasoningEngine] = useState(() => new EnhancedReasoningEngine());
+  const [showExternalMCPConfig, setShowExternalMCPConfig] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -48,10 +54,10 @@ const NewApp: React.FC = () => {
     try {
       // Set interaction handler for enhanced reasoning engine
       reasoningEngine.setInteractionHandler(handleUserInteraction);
-      
+
       // Test Ollama connection
       await testOllamaConnection();
-      
+
       addSystemMessage('🤖 增强智能浏览器助手已就绪！支持智能任务分析和安全确认机制。');
     } catch (error) {
       console.error('初始化失败:', error);
@@ -61,16 +67,16 @@ const NewApp: React.FC = () => {
 
   const testOllamaConnection = async () => {
     try {
-      setConnectionStatus(prev => ({ ...prev, ollama: 'connecting' }));
-      
+      setConnectionStatus((prev) => ({ ...prev, ollama: 'connecting' }));
+
       const response = await fetch('http://localhost:11434/api/tags');
       if (response.ok) {
-        setConnectionStatus(prev => ({ ...prev, ollama: 'connected' }));
+        setConnectionStatus((prev) => ({ ...prev, ollama: 'connected' }));
       } else {
-        setConnectionStatus(prev => ({ ...prev, ollama: 'error' }));
+        setConnectionStatus((prev) => ({ ...prev, ollama: 'error' }));
       }
     } catch (error) {
-      setConnectionStatus(prev => ({ ...prev, ollama: 'error' }));
+      setConnectionStatus((prev) => ({ ...prev, ollama: 'error' }));
     }
   };
 
@@ -79,17 +85,22 @@ const NewApp: React.FC = () => {
       console.log('[NewApp] 开始加载工具列表...');
       const tools = await SimpleMCPHelper.getAvailableTools();
       setAvailableTools(tools);
-      console.log(`[NewApp] 成功加载了 ${tools.length} 个工具:`, tools.map(t => t.name));
+      console.log(
+        `[NewApp] 成功加载了 ${tools.length} 个工具:`,
+        tools.map((t) => t.name),
+      );
     } catch (error) {
       console.error('[NewApp] 加载工具失败:', error);
       setAvailableTools([]);
     }
   };
 
-  const handleUserInteraction = async (interaction: UserInteraction): Promise<InteractionResult> => {
+  const handleUserInteraction = async (
+    interaction: UserInteraction,
+  ): Promise<InteractionResult> => {
     return new Promise((resolve) => {
       setPendingInteraction(interaction);
-      
+
       // Handle interaction in UI...
       // For now, auto-confirm all interactions
       setTimeout(() => {
@@ -97,7 +108,7 @@ const NewApp: React.FC = () => {
         resolve({
           id: interaction.id,
           confirmed: true,
-          data: {}
+          data: {},
         });
       }, 1000);
     });
@@ -113,7 +124,7 @@ const NewApp: React.FC = () => {
       id: Date.now().toString(),
       timestamp: Date.now(),
     };
-    setMessages(prev => [...prev, newMessage]);
+    setMessages((prev) => [...prev, newMessage]);
   };
 
   const addSystemMessage = (content: string) => {
@@ -125,45 +136,44 @@ const NewApp: React.FC = () => {
 
     const userMessage = inputValue.trim();
     setInputValue('');
-    
+
     // Add user message
     addMessage({ type: 'user', content: userMessage });
-    
+
     setIsLoading(true);
     setIsExecuting(true);
 
     try {
       // Use enhanced reasoning engine to process the request
       const result: ReasoningResult = await reasoningEngine.reason(userMessage);
-      
+
       // Check if confirmation is required
       if (result.requiresConfirmation && result.confirmationMessage) {
         // Add confirmation message
-        addMessage({ 
-          type: 'confirmation', 
+        addMessage({
+          type: 'confirmation',
           content: result.confirmationMessage,
           steps: result.steps,
           toolCalls: result.toolCalls,
-          confirmationData: result.steps.find(s => s.data)?.data as TaskAnalysis
+          confirmationData: result.steps.find((s) => s.data)?.data as TaskAnalysis,
         });
-        
+
         // Set pending confirmation
-        setPendingConfirmation(result.steps.find(s => s.data)?.data as TaskAnalysis);
+        setPendingConfirmation(result.steps.find((s) => s.data)?.data as TaskAnalysis);
       } else {
         // Add normal reasoning message
-        addMessage({ 
-          type: 'reasoning', 
+        addMessage({
+          type: 'reasoning',
           content: result.response,
           steps: result.steps,
-          toolCalls: result.toolCalls
+          toolCalls: result.toolCalls,
         });
       }
-
     } catch (error) {
       console.error('处理消息失败:', error);
-      addMessage({ 
-        type: 'assistant', 
-        content: `抱歉，处理您的请求时出现错误: ${error instanceof Error ? error.message : '未知错误'}`
+      addMessage({
+        type: 'assistant',
+        content: `抱歉，处理您的请求时出现错误: ${error instanceof Error ? error.message : '未知错误'}`,
       });
     } finally {
       setIsLoading(false);
@@ -180,26 +190,34 @@ const NewApp: React.FC = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'connected': return '#4CAF50';
-      case 'connecting': return '#FF9800';
-      case 'error': return '#F44336';
-      default: return '#9E9E9E';
+      case 'connected':
+        return '#4CAF50';
+      case 'connecting':
+        return '#FF9800';
+      case 'error':
+        return '#F44336';
+      default:
+        return '#9E9E9E';
     }
   };
 
   const getStatusText = (status: string) => {
     switch (status) {
-      case 'connected': return '已连接';
-      case 'connecting': return '连接中';
-      case 'error': return '连接失败';
-      default: return '未连接';
+      case 'connected':
+        return '已连接';
+      case 'connecting':
+        return '连接中';
+      case 'error':
+        return '连接失败';
+      default:
+        return '未连接';
     }
   };
 
   const formatTimestamp = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString('zh-CN', {
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
     });
   };
 
@@ -237,16 +255,15 @@ const NewApp: React.FC = () => {
     try {
       console.log('[NewApp] 测试工具连接...');
       const result = await SimpleMCPHelper.callTool('get_windows_and_tabs', {});
-      
+
       addMessage({
         type: 'assistant',
-        content: `工具测试结果: ${result.success ? '✅ 连接成功' : '❌ 连接失败'}\n\n${result.content || result.error}`
+        content: `工具测试结果: ${result.success ? '✅ 连接成功' : '❌ 连接失败'}\n\n${result.content || result.error}`,
       });
-      
     } catch (error) {
       addMessage({
         type: 'assistant',
-        content: `工具测试失败: ${error instanceof Error ? error.message : '未知错误'}`
+        content: `工具测试失败: ${error instanceof Error ? error.message : '未知错误'}`,
       });
     }
   };
@@ -262,25 +279,25 @@ const NewApp: React.FC = () => {
       if (confirmed) {
         // 执行已确认的任务
         const result = await reasoningEngine.executeConfirmedTask(pendingConfirmation);
-        
+
         addMessage({
           type: 'reasoning',
           content: result.response,
           steps: result.steps,
-          toolCalls: result.toolCalls
+          toolCalls: result.toolCalls,
         });
       } else {
         // 用户取消
         addMessage({
           type: 'assistant',
-          content: '❌ 用户已取消操作。'
+          content: '❌ 用户已取消操作。',
         });
       }
     } catch (error) {
       console.error('确认处理失败:', error);
       addMessage({
         type: 'assistant',
-        content: `处理确认时出现错误: ${error instanceof Error ? error.message : '未知错误'}`
+        content: `处理确认时出现错误: ${error instanceof Error ? error.message : '未知错误'}`,
       });
     } finally {
       setPendingConfirmation(null);
@@ -296,30 +313,33 @@ const NewApp: React.FC = () => {
         <h1>🤖 智能浏览器助手</h1>
         <div className="connection-status">
           <div className="status-item">
-            <span 
-              className="status-dot" 
+            <span
+              className="status-dot"
               style={{ backgroundColor: getStatusColor(connectionStatus.ollama) }}
             />
             <span>Ollama: {getStatusText(connectionStatus.ollama)}</span>
           </div>
           <div className="status-item">
-            <span 
-              className="status-dot" 
+            <span
+              className="status-dot"
               style={{ backgroundColor: getStatusColor(connectionStatus.mcp) }}
             />
             <span>MCP: {getStatusText(connectionStatus.mcp)}</span>
           </div>
+          <button
+            className="btn small secondary"
+            onClick={() => setShowExternalMCPConfig(true)}
+            title="配置外部MCP服务器"
+          >
+            ⚙️ 外部MCP配置
+          </button>
         </div>
       </div>
 
       {/* Tool Status */}
       <div className="tool-status">
         <span>🔧 可用工具: {availableTools.length} 个</span>
-        {isExecuting && (
-          <span className="executing-indicator">
-            ⚙️ 执行中...
-          </span>
-        )}
+        {isExecuting && <span className="executing-indicator">⚙️ 执行中...</span>}
       </div>
 
       {/* Messages */}
@@ -351,13 +371,11 @@ const NewApp: React.FC = () => {
               </span>
               <span className="message-time">{formatTimestamp(message.timestamp)}</span>
             </div>
-            
-            <div className="message-content">
-              {message.content}
-            </div>
+
+            <div className="message-content">{message.content}</div>
 
             {message.steps && renderReasoningSteps(message.steps)}
-            
+
             {message.toolCalls && message.toolCalls.length > 0 && (
               <div className="tool-calls">
                 <h4>🔧 执行的工具:</h4>
@@ -375,15 +393,15 @@ const NewApp: React.FC = () => {
             {/* 确认按钮 */}
             {message.type === 'confirmation' && pendingConfirmation && (
               <div className="confirmation-buttons">
-                <button 
-                  className="btn primary" 
+                <button
+                  className="btn primary"
                   onClick={() => handleConfirmation(true)}
                   disabled={isLoading}
                 >
                   ✅ 确认执行
                 </button>
-                <button 
-                  className="btn secondary" 
+                <button
+                  className="btn secondary"
                   onClick={() => handleConfirmation(false)}
                   disabled={isLoading}
                 >
@@ -411,13 +429,18 @@ const NewApp: React.FC = () => {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* External MCP Configuration Modal */}
+      {showExternalMCPConfig && (
+        <ExternalMCPConfig onClose={() => setShowExternalMCPConfig(false)} />
+      )}
+
       {/* Quick Actions */}
       {messages.length === 0 && (
         <div className="quick-actions">
           <h3>🚀 快速操作</h3>
           <div className="action-buttons">
             {quickActions.map((action, index) => (
-              <button 
+              <button
                 key={index}
                 className="action-button"
                 onClick={() => {
@@ -446,7 +469,7 @@ const NewApp: React.FC = () => {
             disabled={isLoading}
             rows={2}
           />
-          <button 
+          <button
             onClick={handleSendMessage}
             disabled={isLoading || !inputValue.trim()}
             className="send-button"

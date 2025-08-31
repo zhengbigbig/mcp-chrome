@@ -309,6 +309,15 @@ app.use(cors({
 app.use(express.json());
 
 // HTTP API 端点
+app.get('/tools', async (req, res) => {
+  try {
+    // 返回工具列表，兼容现有的 Chrome 扩展期望
+    res.json(tools);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/tools/list', async (req, res) => {
   try {
     // 直接返回工具列表，不需要通过 MCP Server

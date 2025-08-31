@@ -18,9 +18,8 @@ export default defineConfig({
   manifest: {
     // Use environment variable for the key, fallback to undefined if not set
     key: CHROME_EXTENSION_KEY,
-    default_locale: 'zh_CN',
-    name: '__MSG_extensionName__',
-    description: '__MSG_extensionDescription__',
+    name: 'Chrome MCP Server',
+    description: 'Exposes browser capabilities with your own chrome',
     permissions: [
       'nativeMessaging',
       'tabs',
@@ -53,7 +52,7 @@ export default defineConfig({
       {
         resources: [
           '/models/*', // 允许访问 public/models/ 下的所有文件
-          '/workers/*', // 允许访问 workers 文件
+          // workers 目录已移除
         ],
         matches: ['<all_urls>'],
       },
@@ -76,14 +75,8 @@ export default defineConfig({
             src: 'inject-scripts/*.js',
             dest: 'inject-scripts',
           },
-          {
-            src: ['workers/*'],
-            dest: 'workers',
-          },
-          {
-            src: '_locales/**/*',
-            dest: '_locales',
-          },
+          // workers 目录已移除
+
         ],
       }) as any,
     ],

@@ -12,18 +12,8 @@ const CHROME_EXTENSION_KEY = process.env.CHROME_EXTENSION_KEY;
 // See https://wxt.dev/api/config.html
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
-  runner: {
-    // 方案1: 禁用自动启动（推荐）
-    // disabled: true,
-    // 方案2: 如果要启用自动启动并使用现有配置，取消注释下面的配置
-    // chromiumArgs: [
-    //   '--user-data-dir=' + homedir() + (process.platform === 'darwin'
-    //     ? '/Library/Application Support/Google/Chrome'
-    //     : process.platform === 'win32'
-    //     ? '/AppData/Local/Google/Chrome/User Data'
-    //     : '/.config/google-chrome'),
-    //   '--remote-debugging-port=9222',
-    // ],
+  webExt: {
+    startUrls: ["https://www.google.com/search?q=123456ss"],
   },
   manifest: {
     // Use environment variable for the key, fallback to undefined if not set
@@ -45,9 +35,19 @@ export default defineConfig({
       'storage',
       'sidePanel',
     ],
-    side_panel: {
-      default_path: 'sidepanel.html',
+    action: {
+      default_title: 'AI 助手 - 打开侧边栏',
+      default_icon: {
+        '16': 'icon/16.png',
+        '32': 'icon/32.png',
+        '48': 'icon/48.png',
+        '128': 'icon/128.png'
+      }
     },
+    side_panel: {
+      default_path: 'entrypoints/sidepanel/index.html',
+    },
+
     host_permissions: ['<all_urls>'],
     web_accessible_resources: [
       {

@@ -7,7 +7,13 @@ import { UserInteraction, InteractionResult } from '../../../utils/mcp/user-inte
 
 export interface ReasoningStep {
   id: string;
-  type: 'thinking' | 'tool_execution' | 'user_confirmation' | 'synthesis';
+  type:
+    | 'thinking'
+    | 'tool_execution'
+    | 'user_confirmation'
+    | 'synthesis'
+    | 'task_planning'
+    | 'task_execution';
   content: string;
   toolName?: string;
   parameters?: any;
@@ -15,6 +21,18 @@ export interface ReasoningStep {
   requiresConfirmation?: boolean;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'waiting_confirmation';
   timestamp: Date;
+  taskChain?: TaskChainItem[];
+}
+
+export interface TaskChainItem {
+  id: string;
+  type: 'tool_call' | 'model_call' | 'user_confirmation';
+  name: string;
+  parameters?: any;
+  description: string;
+  dependsOn?: string[]; // 依赖的任务ID
+  requiresConfirmation?: boolean;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'waiting_confirmation';
 }
 
 export interface ExecutionContext {
@@ -26,6 +44,8 @@ export interface ExecutionContext {
   results: Map<string, any>;
   status: 'running' | 'paused' | 'completed' | 'failed';
   contextData: Map<string, any>; // 存储中间结果供后续步骤使用
+  taskChain: TaskChainItem[]; // 任务链条
+  currentTaskIndex: number; // 当前执行的任务索引
 }
 
 export interface ReasoningResult {
@@ -34,10 +54,12 @@ export interface ReasoningResult {
   steps: ReasoningStep[];
   nextAction: 'continue' | 'wait_confirmation' | 'complete' | 'error';
   contextData?: Map<string, any>;
+  taskChain?: TaskChainItem[];
+  todoList?: string[];
 }
 
 export class IntelligentReasoningEngine {
-  private availableTools: Tool[] = [];
+  private availableTools: Map<string, any> = new Map();
   private executionContexts: Map<string, ExecutionContext> = new Map();
   private interactionHandler?: (interaction: UserInteraction) => Promise<InteractionResult>;
   private ollamaEndpoint: string = 'http://localhost:11434';
@@ -52,8 +74,11 @@ export class IntelligentReasoningEngine {
    */
   private async initializeEngine() {
     try {
-      this.availableTools = await SimpleMCPHelper.getAvailableTools();
-      console.log('[IntelligentReasoningEngine] 可用工具数量:', this.availableTools.length);
+      const tools = await SimpleMCPHelper.getAvailableTools();
+      tools.forEach((tool) => {
+        this.availableTools.set(tool.name, tool);
+      });
+      console.log('[IntelligentReasoningEngine] 可用工具数量:', this.availableTools.size);
     } catch (error) {
       console.error('[IntelligentReasoningEngine] 初始化失败:', error);
     }
@@ -64,6 +89,14 @@ export class IntelligentReasoningEngine {
    */
   setInteractionHandler(handler: (interaction: UserInteraction) => Promise<InteractionResult>) {
     this.interactionHandler = handler;
+  }
+
+  /**
+   * 检测浏览器工具
+   */
+  private detectBrowserTools(userInput: string): string[] {
+    const browserToolPattern = /@browser\/[a-zA-Z0-9_/]+/g;
+    return userInput.match(browserToolPattern) || [];
   }
 
   /**
@@ -86,12 +119,14 @@ export class IntelligentReasoningEngine {
         results: new Map(),
         status: 'running',
         contextData: new Map(),
+        taskChain: [],
+        currentTaskIndex: 0,
       };
 
       this.executionContexts.set(sessionId, context);
 
-      // 3. 开始第一步推理
-      return await this.executeNextStep(context);
+      // 3. 生成任务总结和TODO LIST
+      return await this.generateTaskSummary(context);
     } catch (error) {
       console.error('[IntelligentReasoningEngine] 推理失败:', error);
       return {
@@ -104,151 +139,284 @@ export class IntelligentReasoningEngine {
   }
 
   /**
-   * 检测浏览器工具
+   * 生成任务总结和TODO LIST
    */
-  private detectBrowserTools(userInput: string): string[] {
-    const browserToolPattern = /@browser\/[a-zA-Z0-9_/]+/g;
-    return userInput.match(browserToolPattern) || [];
-  }
+  private async generateTaskSummary(context: ExecutionContext): Promise<ReasoningResult> {
+    const summaryStep = this.createStep('task_planning', '分析用户任务，生成执行计划');
+    context.steps.push(summaryStep);
 
-  /**
-   * 执行下一步推理
-   */
-  private async executeNextStep(context: ExecutionContext): Promise<ReasoningResult> {
-    const { detectedTools, currentStep, steps } = context;
+    // 获取工具的详细信息
+    const toolDescriptions = await this.getToolDescriptions(context.detectedTools);
 
-    // 如果所有工具都已执行完成，进行最终总结
-    if (currentStep >= detectedTools.length) {
-      return await this.generateFinalSummary(context);
-    }
-
-    const currentTool = detectedTools[currentStep];
-
-    // 1. 添加思考步骤
-    const thinkingStep = this.createStep(
-      'thinking',
-      `正在分析第 ${currentStep + 1} 步: ${currentTool}`,
-    );
-    context.steps.push(thinkingStep);
-
-    // 2. 生成工具执行参数
-    const parameters = await this.generateToolParameters(context, currentTool);
-
-    // 3. 检查是否需要用户确认
-    if (this.requiresUserConfirmation(currentTool)) {
-      const confirmationStep = this.createStep(
-        'user_confirmation',
-        `需要用户确认执行: ${currentTool}`,
-        currentTool,
-        parameters,
-      );
-      confirmationStep.requiresConfirmation = true;
-      confirmationStep.status = 'waiting_confirmation';
-      context.steps.push(confirmationStep);
-
-      return {
-        success: true,
-        content: `请确认是否执行: ${currentTool}`,
-        steps: context.steps,
-        nextAction: 'wait_confirmation',
-        contextData: context.contextData,
-      };
-    }
-
-    // 4. 执行工具
-    return await this.executeTool(context, currentTool, parameters);
-  }
-
-  /**
-   * 生成工具执行参数
-   */
-  private async generateToolParameters(context: ExecutionContext, toolName: string): Promise<any> {
-    const prompt = `基于以下上下文，为工具 ${toolName} 生成执行参数：
+    const prompt = `分析以下用户输入，生成任务总结和TODO LIST：
 
 用户输入: ${context.userInput}
-已执行步骤: ${context.steps.map((s) => `${s.type}: ${s.content}`).join('\n')}
-当前工具: ${toolName}
-可用上下文数据: ${Array.from(context.contextData.entries())
-      .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
-      .join('\n')}
 
-请生成合适的参数，返回JSON格式：
-{
-  "参数名": "参数值",
-  "reasoning": "参数选择的原因"
-}`;
+检测到的工具及其详细信息:
+${toolDescriptions}
+
+请按照以下格式回复：
+
+## 任务总结
+[用1-2句话总结本次任务的目标]
+
+## TODO LIST
+1. [第一个任务]
+2. [第二个任务]
+3. [第三个任务]
+...
+
+## 任务链条 (JSON格式)
+[
+  {
+    "id": "task_1",
+    "type": "tool_call",
+    "name": "@browser/content/web_fetcher",
+    "parameters": {"selector": "body"},
+    "description": "获取页面内容",
+    "dependsOn": []
+  },
+  {
+    "id": "task_2", 
+    "type": "model_call",
+    "name": "analyze_content",
+    "parameters": {"content": "{{task_1.result}}"},
+    "description": "分析页面内容",
+    "dependsOn": ["task_1"]
+  }
+]
+
+请确保任务链条中的参数能够正确引用前面任务的结果。`;
 
     try {
       const response = await this.callOllama(prompt);
-      // 尝试解析JSON响应
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      return {};
+      summaryStep.content = response;
+      summaryStep.status = 'completed';
+
+      // 解析TODO LIST和任务链条
+      const { todoList, taskChain } = this.parseTaskSummary(response);
+      context.taskChain = taskChain;
+
+      // 开始执行任务链条
+      return await this.executeTaskChain(context);
     } catch (error) {
-      console.error('[IntelligentReasoningEngine] 参数生成失败:', error);
-      return {};
+      summaryStep.status = 'failed';
+      summaryStep.content = '任务分析失败';
+
+      return {
+        success: false,
+        content: '任务分析失败',
+        steps: context.steps,
+        nextAction: 'error',
+      };
     }
   }
 
   /**
-   * 执行工具
+   * 解析任务总结，提取TODO LIST和任务链条
    */
-  private async executeTool(
-    context: ExecutionContext,
-    toolName: string,
-    parameters: any,
-  ): Promise<ReasoningResult> {
+  private parseTaskSummary(response: string): { todoList: string[]; taskChain: TaskChainItem[] } {
+    const todoList: string[] = [];
+    const taskChain: TaskChainItem[] = [];
+
+    // 提取TODO LIST
+    const todoMatch = response.match(/## TODO LIST\n([\s\S]*?)(?=\n##|$)/);
+    if (todoMatch) {
+      const todoLines = todoMatch[1].split('\n').filter((line) => line.trim());
+      todoLines.forEach((line) => {
+        const match = line.match(/^\d+\.\s*(.+)/);
+        if (match) {
+          todoList.push(match[1].trim());
+        }
+      });
+    }
+
+    // 提取任务链条
+    const chainMatch = response.match(/## 任务链条 \(JSON格式\)\n```json\n([\s\S]*?)\n```/);
+    if (chainMatch) {
+      try {
+        const chainData = JSON.parse(chainMatch[1]);
+        chainData.forEach((item: any, index: number) => {
+          taskChain.push({
+            id: item.id || `task_${index + 1}`,
+            type: item.type || 'tool_call',
+            name: item.name,
+            parameters: item.parameters || {},
+            description: item.description || '',
+            dependsOn: item.dependsOn || [],
+            requiresConfirmation: this.requiresUserConfirmation(item.name),
+            status: 'pending',
+          });
+        });
+      } catch (error) {
+        console.error('[IntelligentReasoningEngine] 任务链条解析失败:', error);
+      }
+    }
+
+    return { todoList, taskChain };
+  }
+
+  /**
+   * 执行任务链条
+   */
+  private async executeTaskChain(context: ExecutionContext): Promise<ReasoningResult> {
+    const { taskChain, currentTaskIndex } = context;
+
+    // 如果所有任务都完成了，进行最终总结
+    if (currentTaskIndex >= taskChain.length) {
+      return await this.generateFinalSummary(context);
+    }
+
+    const currentTask = taskChain[currentTaskIndex];
+
+    // 检查依赖关系
+    if (!this.checkDependencies(currentTask, context)) {
+      // 依赖未满足，跳过当前任务
+      context.currentTaskIndex++;
+      return await this.executeTaskChain(context);
+    }
+
+    // 1. 添加任务执行步骤
     const executionStep = this.createStep(
-      'tool_execution',
-      `执行工具: ${toolName}`,
-      toolName,
-      parameters,
+      'task_execution',
+      `执行任务 ${currentTaskIndex + 1}: ${currentTask.description}`,
     );
-    executionStep.status = 'running';
+    executionStep.taskChain = [currentTask];
     context.steps.push(executionStep);
 
+    // 2. 检查是否需要用户确认
+    if (currentTask.requiresConfirmation) {
+      currentTask.status = 'waiting_confirmation';
+      executionStep.status = 'waiting_confirmation';
+
+      return {
+        success: true,
+        content: `请确认是否执行: ${currentTask.description}`,
+        steps: context.steps,
+        nextAction: 'wait_confirmation',
+        contextData: context.contextData,
+        taskChain: taskChain,
+      };
+    }
+
+    // 3. 执行任务
+    return await this.executeTask(context, currentTask);
+  }
+
+  /**
+   * 检查任务依赖关系
+   */
+  private checkDependencies(task: TaskChainItem, context: ExecutionContext): boolean {
+    if (!task.dependsOn || task.dependsOn.length === 0) {
+      return true;
+    }
+
+    return task.dependsOn.every((depId) => {
+      const depTask = context.taskChain.find((t) => t.id === depId);
+      return depTask && depTask.status === 'completed';
+    });
+  }
+
+  /**
+   * 执行单个任务
+   */
+  private async executeTask(
+    context: ExecutionContext,
+    task: TaskChainItem,
+  ): Promise<ReasoningResult> {
+    task.status = 'running';
+
     try {
-      // 1. 添加执行开始消息
-      executionStep.content = `开始执行 ${toolName}，参数: ${JSON.stringify(parameters)}`;
+      if (task.type === 'tool_call') {
+        // 执行工具调用
+        const result = await this.executeToolCall(context, task);
+        task.status = 'completed';
 
-      // 2. 实际执行工具
-      const result = await SimpleMCPHelper.callTool(toolName, parameters);
+        // 存储结果
+        context.results.set(task.id, result);
+        context.contextData.set(`${task.id}_result`, result);
+      } else if (task.type === 'model_call') {
+        // 执行模型调用
+        const result = await this.executeModelCall(context, task);
+        task.status = 'completed';
 
-      // 3. 更新步骤状态
-      executionStep.status = 'completed';
-      executionStep.result = result;
-      executionStep.content = `工具 ${toolName} 执行完成，结果: ${result.success ? '成功' : '失败'}`;
+        // 存储结果
+        context.results.set(task.id, result);
+        context.contextData.set(`${task.id}_result`, result);
+      }
 
-      // 4. 存储结果到上下文
-      context.results.set(toolName, result);
-      context.contextData.set(`${toolName}_result`, result);
+      // 移动到下一个任务
+      context.currentTaskIndex++;
 
-      // 5. 添加推理步骤
-      const reasoningStep = this.createStep(
-        'thinking',
-        `分析 ${toolName} 的执行结果，准备下一步操作`,
-      );
-      context.steps.push(reasoningStep);
-
-      // 6. 移动到下一步
-      context.currentStep++;
-
-      // 7. 继续执行下一步
-      return await this.executeNextStep(context);
+      // 继续执行任务链条
+      return await this.executeTaskChain(context);
     } catch (error) {
-      executionStep.status = 'failed';
-      executionStep.content = `工具 ${toolName} 执行失败: ${error instanceof Error ? error.message : '未知错误'}`;
+      task.status = 'failed';
 
       return {
         success: false,
-        content: `工具执行失败: ${toolName}`,
+        content: `任务执行失败: ${task.description}`,
         steps: context.steps,
         nextAction: 'error',
         contextData: context.contextData,
       };
     }
+  }
+
+  /**
+   * 执行工具调用
+   */
+  private async executeToolCall(context: ExecutionContext, task: TaskChainItem): Promise<any> {
+    // 处理参数中的变量引用
+    const parameters = this.resolveParameters(task.parameters, context);
+
+    return await SimpleMCPHelper.callTool(task.name, parameters);
+  }
+
+  /**
+   * 执行模型调用
+   */
+  private async executeModelCall(context: ExecutionContext, task: TaskChainItem): Promise<any> {
+    // 处理参数中的变量引用
+    const parameters = this.resolveParameters(task.parameters, context);
+
+    const prompt = `执行模型调用: ${task.description}
+
+参数: ${JSON.stringify(parameters)}
+上下文数据: ${Array.from(context.contextData.entries())
+      .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+      .join('\n')}
+
+请根据参数和上下文执行相应的分析或处理。`;
+
+    const result = await this.callOllama(prompt);
+    return { success: true, result };
+  }
+
+  /**
+   * 解析参数中的变量引用
+   */
+  private resolveParameters(parameters: any, context: ExecutionContext): any {
+    if (typeof parameters === 'string') {
+      return this.resolveStringVariables(parameters, context);
+    } else if (typeof parameters === 'object') {
+      const resolved: any = {};
+      for (const [key, value] of Object.entries(parameters)) {
+        resolved[key] = this.resolveParameters(value, context);
+      }
+      return resolved;
+    }
+    return parameters;
+  }
+
+  /**
+   * 解析字符串中的变量引用
+   */
+  private resolveStringVariables(str: string, context: ExecutionContext): string {
+    return str.replace(/\{\{([^}]+)\}\}/g, (match, varName) => {
+      const result = context.results.get(varName);
+      return result ? JSON.stringify(result) : match;
+    });
   }
 
   /**
@@ -276,15 +444,14 @@ export class IntelligentReasoningEngine {
       };
     }
 
-    // 找到等待确认的步骤并标记为完成
-    const waitingStep = context.steps.find((s) => s.status === 'waiting_confirmation');
-    if (waitingStep) {
-      waitingStep.status = 'completed';
-      waitingStep.content = `用户已确认: ${waitingStep.content}`;
+    // 找到等待确认的任务
+    const waitingTask = context.taskChain[context.currentTaskIndex];
+    if (waitingTask) {
+      waitingTask.status = 'completed';
     }
 
-    // 继续执行下一步
-    return await this.executeNextStep(context);
+    // 继续执行任务链条
+    return await this.executeTaskChain(context);
   }
 
   /**
@@ -297,7 +464,7 @@ export class IntelligentReasoningEngine {
     const prompt = `基于以下执行过程，生成一个简洁的总结：
 
 用户输入: ${context.userInput}
-执行步骤: ${context.steps.map((s) => `${s.type}: ${s.content}`).join('\n')}
+执行任务: ${context.taskChain.map((t) => `${t.id}: ${t.description} (${t.status})`).join('\n')}
 执行结果: ${Array.from(context.results.entries())
       .map(([k, v]) => `${k}: ${v.success ? '成功' : '失败'}`)
       .join('\n')}
@@ -322,6 +489,7 @@ export class IntelligentReasoningEngine {
         steps: context.steps,
         nextAction: 'complete',
         contextData: context.contextData,
+        taskChain: context.taskChain,
       };
     } catch (error) {
       summaryStep.status = 'failed';
@@ -335,6 +503,43 @@ export class IntelligentReasoningEngine {
         contextData: context.contextData,
       };
     }
+  }
+
+  /**
+   * 获取工具的详细信息
+   */
+  private async getToolDescriptions(toolNames: string[]): Promise<string> {
+    const descriptions: string[] = [];
+
+    for (const toolName of toolNames) {
+      const tool = this.availableTools.get(toolName);
+      if (tool) {
+        let description = `工具名称: ${toolName}\n`;
+        description += `描述: ${tool.description || '无描述'}\n`;
+
+        if (tool.inputSchema && tool.inputSchema.properties) {
+          description += `参数说明:\n`;
+          for (const [paramName, paramInfo] of Object.entries(tool.inputSchema.properties)) {
+            const param = paramInfo as any;
+            description += `  - ${paramName}: ${param.type || 'unknown'}${param.description ? ` (${param.description})` : ''}\n`;
+          }
+
+          if (tool.inputSchema.required) {
+            description += `必需参数: ${tool.inputSchema.required.join(', ')}\n`;
+          }
+        }
+
+        if (tool.outputSchema) {
+          description += `输出说明: ${JSON.stringify(tool.outputSchema)}\n`;
+        }
+
+        descriptions.push(description);
+      } else {
+        descriptions.push(`工具名称: ${toolName}\n描述: 工具未找到或不可用\n`);
+      }
+    }
+
+    return descriptions.join('\n---\n');
   }
 
   /**

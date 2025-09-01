@@ -5,6 +5,7 @@ import {
   IntelligentReasoningEngine,
   ReasoningResult,
   ReasoningStep,
+  TaskChainItem,
 } from '../services/IntelligentReasoningEngine';
 import { UserInteraction, InteractionResult } from '@/utils/mcp/user-interaction';
 import { ExternalMCPConfig } from './ExternalMCPConfig';
@@ -16,7 +17,15 @@ const { Title } = Typography;
 
 export interface Message {
   id: string;
-  type: 'user' | 'assistant' | 'confirmation' | 'thinking' | 'tool_execution' | 'synthesis';
+  type:
+    | 'user'
+    | 'assistant'
+    | 'confirmation'
+    | 'thinking'
+    | 'tool_execution'
+    | 'synthesis'
+    | 'task_planning'
+    | 'task_execution';
   content: string;
   timestamp: Date;
   steps?: ReasoningStep[];
@@ -25,6 +34,8 @@ export interface Message {
   parameters?: any;
   result?: any;
   requiresConfirmation?: boolean;
+  taskChain?: TaskChainItem[];
+  todoList?: string[];
 }
 
 export default function NewApp() {
@@ -99,6 +110,8 @@ export default function NewApp() {
           type: 'synthesis',
           content: result.content,
           steps: result.steps,
+          taskChain: result.taskChain,
+          todoList: result.todoList,
         });
       } else if (result.nextAction === 'error') {
         // 执行出错
@@ -111,7 +124,25 @@ export default function NewApp() {
 
       // 添加所有步骤到消息中
       result.steps.forEach((step) => {
-        if (step.type === 'thinking') {
+        if (step.type === 'task_planning') {
+          addMessage({
+            type: 'task_planning',
+            content: step.content,
+            steps: [step],
+            taskChain: result.taskChain,
+            todoList: result.todoList,
+          });
+        } else if (step.type === 'task_execution') {
+          addMessage({
+            type: 'task_execution',
+            content: step.content,
+            toolName: step.toolName,
+            parameters: step.parameters,
+            result: step.result,
+            steps: [step],
+            taskChain: step.taskChain,
+          });
+        } else if (step.type === 'thinking') {
           addMessage({
             type: 'thinking',
             content: step.content,

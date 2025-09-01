@@ -68,6 +68,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const isThinking = message.type === 'thinking';
     const isToolExecution = message.type === 'tool_execution';
     const isSynthesis = message.type === 'synthesis';
+    const isTaskPlanning = message.type === 'task_planning';
+    const isTaskExecution = message.type === 'task_execution';
 
     // 根据消息类型选择图标和样式
     let icon = <UserOutlined />;
@@ -79,6 +81,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       icon = <UserOutlined />;
       backgroundColor = '#f0f8ff';
       borderColor = '#d6e4ff';
+    } else if (isTaskPlanning) {
+      icon = <RobotOutlined />;
+      backgroundColor = '#f0f5ff';
+      borderColor = '#adc6ff';
+      textColor = '#1d39c4';
+    } else if (isTaskExecution) {
+      icon = <RobotOutlined />;
+      backgroundColor = '#f6ffed';
+      borderColor = '#b7eb8f';
+      textColor = '#389e0d';
     } else if (isThinking) {
       icon = <RobotOutlined />;
       backgroundColor = '#fff7e6';
@@ -145,31 +157,119 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 <Tag
                   style={{ marginLeft: '8px' }}
                   color={
-                    isThinking
-                      ? 'orange'
-                      : isToolExecution
+                    isTaskPlanning
+                      ? 'blue'
+                      : isTaskExecution
                         ? 'green'
-                        : isSynthesis
-                          ? 'blue'
-                          : isConfirmation
-                            ? 'red'
-                            : 'default'
+                        : isThinking
+                          ? 'orange'
+                          : isToolExecution
+                            ? 'green'
+                            : isSynthesis
+                              ? 'blue'
+                              : isConfirmation
+                                ? 'red'
+                                : 'default'
                   }
                 >
-                  {isThinking
-                    ? '思考中'
-                    : isToolExecution
-                      ? '工具执行'
-                      : isSynthesis
-                        ? '总结'
-                        : isConfirmation
-                          ? '需要确认'
-                          : '助手'}
+                  {isTaskPlanning
+                    ? '任务规划'
+                    : isTaskExecution
+                      ? '任务执行'
+                      : isThinking
+                        ? '思考中'
+                        : isToolExecution
+                          ? '工具执行'
+                          : isSynthesis
+                            ? '总结'
+                            : isConfirmation
+                              ? '需要确认'
+                              : '助手'}
                 </Tag>
               )}
             </div>
 
             <Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{message.content}</Paragraph>
+
+            {/* TODO LIST */}
+            {isTaskPlanning && message.todoList && message.todoList.length > 0 && (
+              <div style={{ marginTop: '12px' }}>
+                <Divider style={{ margin: '8px 0' }} />
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  📋 TODO LIST:
+                </Text>
+                <List
+                  size="small"
+                  dataSource={message.todoList}
+                  renderItem={(item, index) => (
+                    <List.Item style={{ padding: '4px 0' }}>
+                      <Text style={{ fontSize: '12px' }}>
+                        {index + 1}. {item}
+                      </Text>
+                    </List.Item>
+                  )}
+                />
+              </div>
+            )}
+
+            {/* 任务链条 */}
+            {message.taskChain && message.taskChain.length > 0 && (
+              <div style={{ marginTop: '12px' }}>
+                <Divider style={{ margin: '8px 0' }} />
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  🔗 任务链条:
+                </Text>
+                <List
+                  size="small"
+                  dataSource={message.taskChain}
+                  renderItem={(task, index) => (
+                    <List.Item style={{ padding: '4px 0' }}>
+                      <div style={{ width: '100%' }}>
+                        <Text style={{ fontSize: '12px' }}>
+                          {index + 1}. {task.description}
+                        </Text>
+                        <div style={{ marginTop: '4px' }}>
+                          <Tag
+                            style={{ marginRight: '4px' }}
+                            color={
+                              task.status === 'completed'
+                                ? 'success'
+                                : task.status === 'running'
+                                  ? 'processing'
+                                  : task.status === 'failed'
+                                    ? 'error'
+                                    : task.status === 'waiting_confirmation'
+                                      ? 'warning'
+                                      : 'default'
+                            }
+                          >
+                            {task.status === 'completed'
+                              ? '完成'
+                              : task.status === 'running'
+                                ? '执行中'
+                                : task.status === 'failed'
+                                  ? '失败'
+                                  : task.status === 'waiting_confirmation'
+                                    ? '等待确认'
+                                    : '待执行'}
+                          </Tag>
+                          <Tag color="blue">
+                            {task.type === 'tool_call'
+                              ? '工具调用'
+                              : task.type === 'model_call'
+                                ? '模型调用'
+                                : '用户确认'}
+                          </Tag>
+                          {task.dependsOn && task.dependsOn.length > 0 && (
+                            <Tag color="orange">依赖: {task.dependsOn.join(', ')}</Tag>
+                          )}
+                        </div>
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              </div>
+            )}
 
             {/* 工具执行信息 */}
             {isToolExecution && message.toolName && (

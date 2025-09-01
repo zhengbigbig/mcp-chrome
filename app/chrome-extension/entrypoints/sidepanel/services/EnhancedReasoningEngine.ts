@@ -3,9 +3,19 @@
 import { PromptSystem, TaskAnalysis, ToolCall } from './PromptSystem';
 import { SimpleMCPHelper, SimpleTool, ToolCallResult } from '../utils/SimpleMCPHelper';
 import { UserInteraction, InteractionResult } from '../../../utils/mcp/user-interaction';
+import {
+  IntelligentExecutionService,
+  IntelligentExecutionResult,
+} from './IntelligentExecutionService';
 
 export interface ReasoningStepType {
-  type: 'thinking' | 'tool_selection' | 'tool_execution' | 'user_interaction' | 'synthesis';
+  type:
+    | 'thinking'
+    | 'tool_selection'
+    | 'tool_execution'
+    | 'user_interaction'
+    | 'synthesis'
+    | 'intelligent_analysis';
   content: string;
   data?: any;
 }
@@ -17,6 +27,7 @@ export interface ReasoningResult {
   success: boolean;
   requiresConfirmation?: boolean;
   confirmationMessage?: string;
+  intelligentExecution?: IntelligentExecutionResult;
 }
 
 export interface ExecutionContext {
@@ -29,6 +40,7 @@ export interface ExecutionContext {
 
 export class EnhancedReasoningEngine {
   private promptSystem: PromptSystem;
+  private intelligentExecutionService: IntelligentExecutionService;
   private ollamaEndpoint: string = 'http://localhost:11434';
   private defaultModel: string = 'deepseek-r1:1.5b';
   private interactionHandler?: (interaction: UserInteraction) => Promise<InteractionResult>;
@@ -37,6 +49,7 @@ export class EnhancedReasoningEngine {
 
   constructor() {
     this.promptSystem = new PromptSystem();
+    this.intelligentExecutionService = new IntelligentExecutionService();
     this.loadSettings();
   }
 
@@ -57,6 +70,7 @@ export class EnhancedReasoningEngine {
    */
   setInteractionHandler(handler: (interaction: UserInteraction) => Promise<InteractionResult>) {
     this.interactionHandler = handler;
+    this.intelligentExecutionService.setInteractionHandler(handler);
   }
 
   /**
@@ -64,26 +78,118 @@ export class EnhancedReasoningEngine {
    */
   async reason(userInput: string): Promise<ReasoningResult> {
     console.log(`[EnhancedReasoningEngine] 开始推理: ${userInput}`);
-    
+
     const steps: ReasoningStepType[] = [];
-    
+
     try {
       this.isExecuting = true;
 
-      // Step 1: 获取可用工具
+      // Step 1: 智能分析用户输入，检测是否包含浏览器工具
+      steps.push({
+        type: 'intelligent_analysis',
+        content: '🤖 正在使用智能工具编排系统分析您的需求...',
+      });
+
+      const sessionId = `session_${Date.now()}`;
+      const intelligentResult = await this.intelligentExecutionService.executeUserRequest(
+        userInput,
+        sessionId,
+      );
+
+      steps.push({
+        type: 'intelligent_analysis',
+        content: `✅ 智能分析完成！
+        
+**检测结果**: ${intelligentResult.containsBrowserTools ? '包含浏览器工具' : '不包含浏览器工具'}
+**检测到的工具**: ${intelligentResult.detectedTools.join(', ') || '无'}
+**置信度**: ${(intelligentResult.confidence * 100).toFixed(1)}%
+**状态**: ${intelligentResult.status}`,
+        data: intelligentResult,
+      });
+
+      // Step 2: 如果不包含浏览器工具，使用传统方式处理
+      if (!intelligentResult.containsBrowserTools) {
+        steps.push({
+          type: 'thinking',
+          content: '📝 未检测到浏览器工具，使用传统推理方式处理...',
+        });
+
+        return await this.processWithTraditionalReasoning(userInput, steps);
+      }
+
+      // Step 3: 如果包含浏览器工具，使用智能编排系统
+      if (intelligentResult.taskListPrompt) {
+        steps.push({
+          type: 'tool_selection',
+          content: `🔧 检测到浏览器工具，已生成智能执行计划！
+          
+**任务清单提示词**:
+${intelligentResult.taskListPrompt}
+
+**执行计划**: ${intelligentResult.executionPlan?.length || 0} 个任务
+**下一步**: 等待用户确认执行计划`,
+          data: intelligentResult,
+        });
+
+        return {
+          steps,
+          response: '已生成智能执行计划，请查看并确认',
+          toolCalls: [],
+          success: true,
+          requiresConfirmation: true,
+          confirmationMessage: '请确认是否执行以下任务计划？',
+          intelligentExecution: intelligentResult,
+        };
+      }
+
+      // Step 4: 如果智能编排失败，回退到传统方式
+      steps.push({
+        type: 'thinking',
+        content: '⚠️ 智能编排系统未生成执行计划，回退到传统推理方式...',
+      });
+
+      return await this.processWithTraditionalReasoning(userInput, steps);
+    } catch (error) {
+      console.error('[EnhancedReasoningEngine] 推理失败:', error);
+
+      steps.push({
+        type: 'synthesis',
+        content: `❌ 推理失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      });
+
+      return {
+        steps,
+        response: '抱歉，处理您的请求时出现了错误。请尝试重新描述您的需求。',
+        toolCalls: [],
+        success: false,
+      };
+    } finally {
+      this.isExecuting = false;
+    }
+  }
+
+  /**
+   * 使用传统推理方式处理
+   */
+  private async processWithTraditionalReasoning(
+    userInput: string,
+    steps: ReasoningStepType[],
+  ): Promise<ReasoningResult> {
+    try {
+      // 获取可用工具
       const tools = await SimpleMCPHelper.getAvailableTools();
       this.promptSystem.setAvailableTools(tools);
 
-      // Step 2: 智能分析用户输入
+      // 智能分析用户输入
       steps.push({
         type: 'thinking',
-        content: '🤔 正在分析您的需求，理解任务意图...'
+        content: '🤔 正在分析您的需求，理解任务意图...',
       });
 
       const analysis = await this.promptSystem.analyzeUserInput(
-        userInput, 
-        this.ollamaEndpoint, 
-        this.defaultModel
+        userInput,
+        this.ollamaEndpoint,
+        this.defaultModel,
       );
 
       steps.push({
@@ -96,16 +202,16 @@ export class EnhancedReasoningEngine {
 **工具数量**: ${analysis.toolCalls.length}个
 
 ${analysis.reasoning}`,
-        data: analysis
+        data: analysis,
       });
 
-      // Step 3: 检查是否需要用户确认
+      // 检查是否需要用户确认
       if (analysis.confirmationRequired) {
         const confirmationMessage = this.promptSystem.generateConfirmationMessage(analysis);
-        
+
         steps.push({
           type: 'user_interaction',
-          content: '⏳ 等待用户确认操作...'
+          content: '⏳ 等待用户确认操作...',
         });
 
         return {
@@ -114,29 +220,26 @@ ${analysis.reasoning}`,
           toolCalls: analysis.toolCalls,
           success: false,
           requiresConfirmation: true,
-          confirmationMessage
+          confirmationMessage,
         };
       }
 
-      // Step 4: 直接执行（低风险任务）
+      // 直接执行（低风险任务）
       return await this.executeTaskPlan(analysis, steps);
-
     } catch (error) {
-      console.error('[EnhancedReasoningEngine] 推理失败:', error);
-      
+      console.error('[EnhancedReasoningEngine] 传统推理失败:', error);
+
       steps.push({
         type: 'synthesis',
-        content: `❌ 推理失败: ${error instanceof Error ? error.message : '未知错误'}`
+        content: `❌ 传统推理失败: ${error instanceof Error ? error.message : '未知错误'}`,
       });
 
       return {
         steps,
-        response: '抱歉，处理您的请求时出现了错误。请尝试重新描述您的需求。',
+        response: '抱歉，传统推理方式也失败了。请尝试重新描述您的需求。',
         toolCalls: [],
-        success: false
+        success: false,
       };
-    } finally {
-      this.isExecuting = false;
     }
   }
 
@@ -146,27 +249,99 @@ ${analysis.reasoning}`,
   async executeConfirmedTask(analysis: TaskAnalysis): Promise<ReasoningResult> {
     console.log('[EnhancedReasoningEngine] 执行已确认的任务');
 
-    const steps: ReasoningStepType[] = [{
-      type: 'user_interaction',
-      content: '✅ 用户已确认，开始执行任务...'
-    }];
+    const steps: ReasoningStepType[] = [
+      {
+        type: 'user_interaction',
+        content: '✅ 用户已确认，开始执行任务...',
+      },
+    ];
 
     try {
       this.isExecuting = true;
       return await this.executeTaskPlan(analysis, steps);
     } catch (error) {
       console.error('[EnhancedReasoningEngine] 执行确认任务失败:', error);
-      
+
       steps.push({
         type: 'synthesis',
-        content: `❌ 执行失败: ${error instanceof Error ? error.message : '未知错误'}`
+        content: `❌ 执行失败: ${error instanceof Error ? error.message : '未知错误'}`,
       });
 
       return {
         steps,
         response: '任务执行过程中出现错误，请检查具体步骤。',
         toolCalls: analysis.toolCalls,
-        success: false
+        success: false,
+      };
+    } finally {
+      this.isExecuting = false;
+    }
+  }
+
+  /**
+   * 执行智能编排任务
+   */
+  async executeIntelligentTask(sessionId: string): Promise<ReasoningResult> {
+    console.log('[EnhancedReasoningEngine] 执行智能编排任务');
+
+    const steps: ReasoningStepType[] = [
+      {
+        type: 'user_interaction',
+        content: '🚀 用户已确认智能执行计划，开始执行...',
+      },
+    ];
+
+    try {
+      this.isExecuting = true;
+
+      // 确认执行任务
+      const result = await this.intelligentExecutionService.confirmTaskExecution(sessionId);
+
+      if (result.success) {
+        steps.push({
+          type: 'tool_execution',
+          content: `✅ 智能任务执行完成！
+          
+**状态**: ${result.status}
+**消息**: ${result.message}
+**下一步**: ${result.nextAction}`,
+          data: result,
+        });
+
+        return {
+          steps,
+          response: result.message || '智能任务执行完成',
+          toolCalls: [],
+          success: true,
+          intelligentExecution: result,
+        };
+      } else {
+        steps.push({
+          type: 'synthesis',
+          content: `❌ 智能任务执行失败: ${result.message}`,
+        });
+
+        return {
+          steps,
+          response: `智能任务执行失败: ${result.message}`,
+          toolCalls: [],
+          success: false,
+          intelligentExecution: result,
+        };
+      }
+    } catch (error) {
+      console.error('[EnhancedReasoningEngine] 执行智能任务失败:', error);
+
+      steps.push({
+        type: 'synthesis',
+        content: `❌ 执行失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      });
+
+      return {
+        steps,
+        response: '智能任务执行过程中出现错误，请检查具体步骤。',
+        toolCalls: [],
+        success: false,
       };
     } finally {
       this.isExecuting = false;
@@ -176,7 +351,10 @@ ${analysis.reasoning}`,
   /**
    * 执行任务计划
    */
-  private async executeTaskPlan(analysis: TaskAnalysis, steps: ReasoningStepType[]): Promise<ReasoningResult> {
+  private async executeTaskPlan(
+    analysis: TaskAnalysis,
+    steps: ReasoningStepType[],
+  ): Promise<ReasoningResult> {
     const { toolCalls } = analysis;
     const results: ToolCallResult[] = [];
 
@@ -186,226 +364,95 @@ ${analysis.reasoning}`,
       analysis,
       executionPlan: toolCalls,
       results,
-      currentStep: 0
+      currentStep: 0,
     };
 
     // Step: 开始执行工具
     steps.push({
       type: 'tool_execution',
-      content: `🔧 开始执行 ${toolCalls.length} 个工具...`
+      content: `🔧 开始执行 ${toolCalls.length} 个工具...`,
     });
 
     // 逐个执行工具
     for (let i = 0; i < toolCalls.length; i++) {
       const toolCall = toolCalls[i];
-      this.currentContext.currentStep = i;
-
-      console.log(`[EnhancedReasoningEngine] 执行工具 ${i + 1}/${toolCalls.length}: ${toolCall.tool}`);
 
       try {
-        // 检查是否需要额外确认（针对中风险操作）
-        if (toolCall.requiresConfirmation && this.interactionHandler) {
-          const interaction: UserInteraction = {
-            id: `confirm_${Date.now()}`,
-            type: 'confirmation',
-            message: `即将执行: ${toolCall.tool}\n原因: ${toolCall.reasoning}\n是否继续？`,
-            options: ['确认', '跳过', '取消'],
-            data: { toolCall }
-          };
+        steps.push({
+          type: 'tool_execution',
+          content: `🔄 执行工具 ${i + 1}/${toolCalls.length}: ${toolCall.tool}`,
+        });
 
-          const interactionResult = await this.interactionHandler(interaction);
-          
-          if (!interactionResult.confirmed) {
-            steps.push({
-              type: 'user_interaction',
-              content: `⏭️ 用户选择跳过工具: ${toolCall.tool}`
-            });
-            continue;
-          }
-        }
-
-        // 执行工具
         const result = await SimpleMCPHelper.callTool(toolCall.tool, toolCall.args);
         results.push(result);
 
         steps.push({
           type: 'tool_execution',
-          content: `${result.success ? '✅' : '❌'} ${toolCall.tool}: ${result.success ? '执行成功' : result.error}`,
-          data: { toolCall, result }
+          content: `✅ 工具执行成功: ${toolCall.tool}`,
         });
-
-        // 如果是关键工具失败，考虑是否继续
-        if (!result.success && toolCall.riskLevel === 'high') {
-          console.warn(`[EnhancedReasoningEngine] 关键工具失败: ${toolCall.tool}`);
-          break;
-        }
-
       } catch (error) {
-        console.error(`[EnhancedReasoningEngine] 工具执行异常: ${toolCall.tool}`, error);
-        
-        const errorResult: ToolCallResult = {
-          success: false,
-          content: '',
-          error: error instanceof Error ? error.message : '执行异常'
-        };
-        results.push(errorResult);
+        console.error(`[EnhancedReasoningEngine] 工具执行失败: ${toolCall.tool}`, error);
 
         steps.push({
           type: 'tool_execution',
-          content: `❌ ${toolCall.tool}: 执行异常 - ${errorResult.error}`,
-          data: { toolCall, result: errorResult }
+          content: `❌ 工具执行失败: ${toolCall.tool} - ${error instanceof Error ? error.message : '未知错误'}`,
         });
+
+        return {
+          steps,
+          response: `工具执行失败: ${toolCall.tool}`,
+          toolCalls: toolCalls.slice(0, i + 1),
+          success: false,
+        };
       }
     }
 
-    // Step: 结果合成
+    // 所有工具执行完成
     steps.push({
       type: 'synthesis',
-      content: '📋 正在整理执行结果...'
+      content: `🎉 所有工具执行完成！共执行 ${toolCalls.length} 个工具`,
     });
-
-    const response = await this.synthesizeResults(results, toolCalls, analysis);
-    
-    steps.push({
-      type: 'synthesis',
-      content: '✨ 任务执行完成！'
-    });
-
-    const successCount = results.filter(r => r.success).length;
-    const overallSuccess = successCount > 0 && successCount >= Math.ceil(toolCalls.length * 0.6); // 60%成功率阈值
 
     return {
       steps,
-      response,
+      response: '任务执行完成！',
       toolCalls,
-      success: overallSuccess
+      success: true,
     };
   }
 
   /**
-   * 合成执行结果 - 借鉴prompt中的结果整理思路
+   * 获取智能执行状态
    */
-  private async synthesizeResults(
-    results: ToolCallResult[], 
-    toolCalls: ToolCall[], 
-    analysis: TaskAnalysis
-  ): Promise<string> {
-    const successCount = results.filter(r => r.success).length;
-    const totalCount = results.length;
-
-    // 简单情况：只有一个工具
-    if (totalCount === 1) {
-      const result = results[0];
-      const toolCall = toolCalls[0];
-      
-      if (result.success) {
-        return `✅ ${toolCall.reasoning}\n\n**结果**:\n${result.content}`;
-      } else {
-        return `❌ 执行失败: ${result.error}`;
-      }
-    }
-
-    // 复杂情况：多个工具，使用LLM合成结果
-    try {
-      const prompt = `请根据以下信息生成一个简洁、清晰的任务执行总结：
-
-**用户意图**: ${analysis.intent}
-**执行情况**: ${successCount}/${totalCount} 个工具成功执行
-
-**详细结果**:
-${results.map((result, index) => {
-  const toolCall = toolCalls[index];
-  return `${index + 1}. **${toolCall.tool}** (${toolCall.reasoning})
-   状态: ${result.success ? '✅ 成功' : '❌ 失败'}
-   ${result.success ? `结果: ${result.content.substring(0, 200)}${result.content.length > 200 ? '...' : ''}` : `错误: ${result.error}`}`;
-}).join('\n\n')}
-
-请生成一个用户友好的总结，包括：
-1. 整体执行状况
-2. 主要完成的任务
-3. 如有失败，简要说明原因
-4. 给用户的下一步建议（如果需要）
-
-请用自然、友好的语言回复，不要使用JSON格式：`;
-
-      const response = await this.callOllama(prompt);
-      return response;
-
-    } catch (error) {
-      console.error('[EnhancedReasoningEngine] 结果合成失败:', error);
-      
-      // 后备合成策略
-      let summary = `📊 **执行总结**\n\n`;
-      summary += `✅ 成功: ${successCount} 个\n`;
-      summary += `❌ 失败: ${totalCount - successCount} 个\n\n`;
-      
-      if (successCount === totalCount) {
-        summary += `🎉 所有任务都已成功完成！`;
-      } else if (successCount > 0) {
-        summary += `⚠️ 部分任务完成，请检查失败的操作是否需要重试。`;
-      } else {
-        summary += `💥 所有任务都失败了，请检查网络连接和页面状态。`;
-      }
-
-      return summary;
-    }
+  getIntelligentExecutionStatus(sessionId: string): IntelligentExecutionResult | undefined {
+    return this.intelligentExecutionService.getExecutionStatus(sessionId);
   }
 
   /**
-   * 调用Ollama生成响应
+   * 获取任务清单提示词
    */
-  private async callOllama(prompt: string): Promise<string> {
-    const response = await fetch(`${this.ollamaEndpoint}/api/generate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: this.defaultModel,
-        prompt: prompt,
-        stream: false,
-        options: {
-          temperature: 0.3,
-          top_p: 0.9,
-          num_predict: 1024
-        }
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Ollama API调用失败: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data.response || '无法生成响应';
+  getTaskListPrompt(sessionId: string): string | undefined {
+    return this.intelligentExecutionService.getTaskListPrompt(sessionId);
   }
 
   /**
-   * 获取可用工具
+   * 获取执行计划
    */
-  async getAvailableTools(): Promise<SimpleTool[]> {
-    return await SimpleMCPHelper.getAvailableTools();
+  getExecutionPlan(sessionId: string): any[] | undefined {
+    return this.intelligentExecutionService.getExecutionPlan(sessionId);
   }
 
   /**
-   * 检查是否正在执行
+   * 生成执行报告
    */
-  isCurrentlyExecuting(): boolean {
-    return this.isExecuting;
+  generateExecutionReport(sessionId: string): string {
+    return this.intelligentExecutionService.generateExecutionReport(sessionId);
   }
 
   /**
-   * 获取当前执行上下文
+   * 清理会话
    */
-  getCurrentContext(): ExecutionContext | undefined {
-    return this.currentContext;
-  }
-
-  /**
-   * 取消当前执行
-   */
-  cancelExecution(): void {
-    this.isExecuting = false;
-    this.currentContext = undefined;
+  cleanupSession(sessionId: string): void {
+    this.intelligentExecutionService.cleanupSession(sessionId);
   }
 }

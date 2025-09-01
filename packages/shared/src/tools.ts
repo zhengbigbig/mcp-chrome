@@ -2,31 +2,72 @@ import { type Tool } from '@modelcontextprotocol/sdk/types.js';
 
 export const TOOL_NAMES = {
   BROWSER: {
-    GET_WINDOWS_AND_TABS: 'get_windows_and_tabs',
-    SEARCH_TABS_CONTENT: 'search_tabs_content',
-    NAVIGATE: 'chrome_navigate',
-    SCREENSHOT: 'chrome_screenshot',
-    CLOSE_TABS: 'chrome_close_tabs',
-    GO_BACK_OR_FORWARD: 'chrome_go_back_or_forward',
-    WEB_FETCHER: 'chrome_get_web_content',
-    CLICK: 'chrome_click_element',
-    FILL: 'chrome_fill_or_select',
-    GET_INTERACTIVE_ELEMENTS: 'chrome_get_interactive_elements',
-    NETWORK_CAPTURE_START: 'chrome_network_capture_start',
-    NETWORK_CAPTURE_STOP: 'chrome_network_capture_stop',
-    NETWORK_REQUEST: 'chrome_network_request',
-    NETWORK_DEBUGGER_START: 'chrome_network_debugger_start',
-    NETWORK_DEBUGGER_STOP: 'chrome_network_debugger_stop',
-    KEYBOARD: 'chrome_keyboard',
-    HISTORY: 'chrome_history',
-    BOOKMARK_SEARCH: 'chrome_bookmark_search',
-    BOOKMARK_ADD: 'chrome_bookmark_add',
-    BOOKMARK_DELETE: 'chrome_bookmark_delete',
-    INJECT_SCRIPT: 'chrome_inject_script',
-    SEND_COMMAND_TO_INJECT_SCRIPT: 'chrome_send_command_to_inject_script',
-    CONSOLE: 'chrome_console',
+    // 窗口和标签页管理
+    GET_WINDOWS_AND_TABS: '@browser/window/get_windows_and_tabs',
+    SEARCH_TABS_CONTENT: '@browser/window/search_tabs_content',
+    NAVIGATE: '@browser/navigation/navigate',
+    CLOSE_TABS: '@browser/window/close_tabs',
+    GO_BACK_OR_FORWARD: '@browser/navigation/go_back_or_forward',
+
+    // 页面内容获取
+    WEB_FETCHER: '@browser/content/web_fetcher',
+    SCREENSHOT: '@browser/content/screenshot',
+
+    // 页面交互
+    CLICK: '@browser/interaction/click',
+    FILL: '@browser/interaction/fill',
+    GET_INTERACTIVE_ELEMENTS: '@browser/interaction/get_interactive_elements',
+    KEYBOARD: '@browser/interaction/keyboard',
+
+    // 网络相关
+    NETWORK_CAPTURE_START: '@browser/network/capture_start',
+    NETWORK_CAPTURE_STOP: '@browser/network/capture_stop',
+    NETWORK_REQUEST: '@browser/network/request',
+    NETWORK_DEBUGGER_START: '@browser/network/debugger_start',
+    NETWORK_DEBUGGER_STOP: '@browser/network/debugger_stop',
+
+    // 浏览器数据
+    HISTORY: '@browser/data/history',
+    BOOKMARK_SEARCH: '@browser/data/bookmark_search',
+    BOOKMARK_ADD: '@browser/data/bookmark_add',
+    BOOKMARK_DELETE: '@browser/data/bookmark_delete',
+
+    // 脚本注入
+    INJECT_SCRIPT: '@browser/script/inject_script',
+    SEND_COMMAND_TO_INJECT_SCRIPT: '@browser/script/send_command',
+
+    // 调试和日志
+    CONSOLE: '@browser/debug/console',
   },
 };
+
+// 工具分类映射
+export const TOOL_CATEGORIES = {
+  WINDOW: 'window',
+  NAVIGATION: 'navigation',
+  CONTENT: 'content',
+  INTERACTION: 'interaction',
+  NETWORK: 'network',
+  DATA: 'data',
+  SCRIPT: 'script',
+  DEBUG: 'debug',
+} as const;
+
+// 工具执行优先级
+export const TOOL_PRIORITIES = {
+  HIGH: 1, // 需要用户确认或关键操作
+  MEDIUM: 2, // 需要等待前置工具完成
+  LOW: 3, // 可以并行执行
+} as const;
+
+// 工具依赖关系
+export const TOOL_DEPENDENCIES = {
+  '@browser/interaction/click': ['@browser/content/web_fetcher'],
+  '@browser/interaction/fill': ['@browser/content/web_fetcher'],
+  '@browser/content/screenshot': ['@browser/content/web_fetcher'],
+  '@browser/network/capture_start': ['@browser/navigation/navigate'],
+  '@browser/network/debugger_start': ['@browser/navigation/navigate'],
+} as const;
 
 export const TOOL_SCHEMAS: Tool[] = [
   {
@@ -63,7 +104,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.SCREENSHOT,
     description:
-      'Take a screenshot of the current page or a specific element(if you want to see the page, recommend to use chrome_get_web_content first)',
+      'Take a screenshot of the current page or a specific element(if you want to see the page, recommend to use @browser/content/web_fetcher first)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -489,7 +530,7 @@ export const TOOL_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT,
     description:
-      'if the script injected using chrome_inject_script listens for user-defined events, this tool can be used to trigger those events',
+      'if the script injected using @browser/script/inject_script listens for user-defined events, this tool can be used to trigger those events',
     inputSchema: {
       type: 'object',
       properties: {

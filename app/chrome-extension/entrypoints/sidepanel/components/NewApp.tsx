@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout, Menu, Button, Dropdown, Space, Typography, ConfigProvider } from 'antd';
 import { SettingOutlined, ApiOutlined, MessageOutlined, MenuOutlined } from '@ant-design/icons';
-import { EnhancedReasoningEngine } from '../services/EnhancedReasoningEngine';
-import { TaskAnalysis, UserInteraction, InteractionResult } from '@/utils/mcp/user-interaction';
+import {
+  IntelligentReasoningEngine,
+  ReasoningResult,
+  ReasoningStep,
+} from '../services/IntelligentReasoningEngine';
+import { UserInteraction, InteractionResult } from '@/utils/mcp/user-interaction';
 import { ExternalMCPConfig } from './ExternalMCPConfig';
 import { HostConfig } from './HostConfig';
 import { ChatPanel } from './ChatPanel';
@@ -12,20 +16,15 @@ const { Title } = Typography;
 
 export interface Message {
   id: string;
-  type: 'user' | 'assistant' | 'confirmation';
+  type: 'user' | 'assistant' | 'confirmation' | 'thinking' | 'tool_execution' | 'synthesis';
   content: string;
   timestamp: Date;
-  steps?: any[];
+  steps?: ReasoningStep[];
   toolCalls?: any[];
-  confirmationData?: TaskAnalysis;
-}
-
-export interface ReasoningResult {
-  requiresConfirmation: boolean;
-  confirmationMessage?: string;
-  steps: any[];
-  toolCalls: any[];
+  toolName?: string;
+  parameters?: any;
   result?: any;
+  requiresConfirmation?: boolean;
 }
 
 export default function NewApp() {
@@ -33,21 +32,28 @@ export default function NewApp() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [currentPanel, setCurrentPanel] = useState<'chat' | 'host' | 'mcp'>('chat');
-  const [pendingConfirmation, setPendingConfirmation] = useState<TaskAnalysis | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<ReasoningStep | null>(null);
   const [showExternalMCPConfig, setShowExternalMCPConfig] = useState(false);
-  const reasoningEngineRef = useRef<EnhancedReasoningEngine | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string>('');
+  const reasoningEngineRef = useRef<IntelligentReasoningEngine | null>(null);
 
   useEffect(() => {
-    // 初始化增强推理引擎
-    reasoningEngineRef.current = new EnhancedReasoningEngine();
-    reasoningEngineRef.current.setInteractionHandler({
-      requestConfirmation: async (interaction: UserInteraction): Promise<InteractionResult> => {
+    // 初始化智能推理引擎
+    reasoningEngineRef.current = new IntelligentReasoningEngine();
+    reasoningEngineRef.current.setInteractionHandler(
+      async (interaction: UserInteraction): Promise<InteractionResult> => {
         return new Promise((resolve) => {
           // 这里会在 handleConfirmation 中处理
-          setPendingConfirmation(interaction.data as TaskAnalysis);
+          setPendingConfirmation(interaction.data as ReasoningStep);
+          // 暂时返回一个默认的确认结果
+          resolve({
+            id: interaction.id,
+            confirmed: true,
+            data: interaction.data,
+          });
         });
       },
-    });
+    );
   }, []);
 
   const addMessage = (message: Omit<Message, 'id' | 'timestamp'>) => {
@@ -56,7 +62,7 @@ export default function NewApp() {
       id: Date.now().toString(),
       timestamp: new Date(),
     };
-    setMessages(prev => [...prev, newMessage]);
+    setMessages((prev) => [...prev, newMessage]);
   };
 
   const handleSendMessage = async (userMessage: string) => {
@@ -66,30 +72,67 @@ export default function NewApp() {
     addMessage({ type: 'user', content: userMessage });
 
     try {
-      const result: ReasoningResult = await reasoningEngineRef.current.reason(userMessage);
-      
-      if (result.requiresConfirmation && result.confirmationMessage) {
-        addMessage({ 
-          type: 'confirmation', 
-          content: result.confirmationMessage,
+      // 生成新的会话ID
+      const sessionId = `session_${Date.now()}`;
+      setCurrentSessionId(sessionId);
+
+      // 开始智能推理
+      const result = await reasoningEngineRef.current.startReasoning(userMessage, sessionId);
+
+      // 根据结果类型处理
+      if (result.nextAction === 'wait_confirmation') {
+        // 需要用户确认
+        const confirmationStep = result.steps.find((s) => s.requiresConfirmation);
+        if (confirmationStep) {
+          setPendingConfirmation(confirmationStep);
+          addMessage({
+            type: 'confirmation',
+            content: `请确认是否执行: ${confirmationStep.toolName}`,
+            requiresConfirmation: true,
+            toolName: confirmationStep.toolName,
+            parameters: confirmationStep.parameters,
+          });
+        }
+      } else if (result.nextAction === 'complete') {
+        // 执行完成
+        addMessage({
+          type: 'synthesis',
+          content: result.content,
           steps: result.steps,
-          toolCalls: result.toolCalls,
-          confirmationData: result.steps.find(s => s.data)?.data as TaskAnalysis
         });
-        setPendingConfirmation(result.steps.find(s => s.data)?.data as TaskAnalysis);
-      } else {
-        addMessage({ 
-          type: 'assistant', 
-          content: result.result || '任务执行完成',
+      } else if (result.nextAction === 'error') {
+        // 执行出错
+        addMessage({
+          type: 'assistant',
+          content: `执行失败: ${result.content}`,
           steps: result.steps,
-          toolCalls: result.toolCalls
         });
       }
+
+      // 添加所有步骤到消息中
+      result.steps.forEach((step) => {
+        if (step.type === 'thinking') {
+          addMessage({
+            type: 'thinking',
+            content: step.content,
+            steps: [step],
+          });
+        } else if (step.type === 'tool_execution') {
+          addMessage({
+            type: 'tool_execution',
+            content: step.content,
+            toolName: step.toolName,
+            parameters: step.parameters,
+            result: step.result,
+            steps: [step],
+          });
+        }
+      });
     } catch (error) {
-      console.error('推理引擎执行失败:', error);
-      addMessage({ 
-        type: 'assistant', 
-        content: `执行失败: ${error instanceof Error ? error.message : '未知错误'}`
+      console.error('智能推理执行失败:', error);
+      addMessage({
+        type: 'assistant',
+        content: `执行失败: ${error instanceof Error ? error.message : '未知错误'}`,
       });
     } finally {
       setIsLoading(false);
@@ -97,33 +140,81 @@ export default function NewApp() {
   };
 
   const handleConfirmation = async (accepted: boolean) => {
-    if (!pendingConfirmation || !reasoningEngineRef.current) return;
+    if (!pendingConfirmation || !reasoningEngineRef.current || !currentSessionId) return;
 
     try {
+      setIsLoading(true);
+
       if (accepted) {
-        const result = await reasoningEngineRef.current.executeConfirmedTask(pendingConfirmation);
-        addMessage({ 
-          type: 'assistant', 
-          content: result || '任务执行完成',
-          steps: pendingConfirmation.steps,
-          toolCalls: pendingConfirmation.toolCalls
+        // 用户确认，继续执行
+        const result = await reasoningEngineRef.current.continueAfterConfirmation(
+          currentSessionId,
+          true,
+        );
+
+        // 处理继续执行的结果
+        if (result.nextAction === 'wait_confirmation') {
+          // 又遇到需要确认的步骤
+          const confirmationStep = result.steps.find((s) => s.requiresConfirmation);
+          if (confirmationStep) {
+            setPendingConfirmation(confirmationStep);
+            addMessage({
+              type: 'confirmation',
+              content: `请确认是否执行: ${confirmationStep.toolName}`,
+              requiresConfirmation: true,
+              toolName: confirmationStep.toolName,
+              parameters: confirmationStep.parameters,
+            });
+          }
+        } else if (result.nextAction === 'complete') {
+          // 执行完成
+          addMessage({
+            type: 'synthesis',
+            content: result.content,
+            steps: result.steps,
+          });
+          setPendingConfirmation(null);
+        }
+
+        // 添加新的步骤到消息中
+        result.steps.forEach((step) => {
+          if (step.type === 'thinking') {
+            addMessage({
+              type: 'thinking',
+              content: step.content,
+              steps: [step],
+            });
+          } else if (step.type === 'tool_execution') {
+            addMessage({
+              type: 'tool_execution',
+              content: step.content,
+              toolName: step.toolName,
+              parameters: step.parameters,
+              result: step.result,
+              steps: [step],
+            });
+          }
         });
       } else {
-        addMessage({ 
-          type: 'assistant', 
-          content: '用户取消了任务执行',
-          steps: pendingConfirmation.steps,
-          toolCalls: pendingConfirmation.toolCalls
+        // 用户取消
+        addMessage({
+          type: 'assistant',
+          content: '用户取消了操作',
         });
+        setPendingConfirmation(null);
+
+        // 清理会话
+        reasoningEngineRef.current.cleanupSession(currentSessionId);
+        setCurrentSessionId('');
       }
     } catch (error) {
-      console.error('确认任务执行失败:', error);
-      addMessage({ 
-        type: 'assistant', 
-        content: `执行失败: ${error instanceof Error ? error.message : '未知错误'}`
+      console.error('确认后继续执行失败:', error);
+      addMessage({
+        type: 'assistant',
+        content: `执行失败: ${error instanceof Error ? error.message : '未知错误'}`,
       });
     } finally {
-      setPendingConfirmation(null);
+      setIsLoading(false);
     }
   };
 
@@ -168,15 +259,17 @@ export default function NewApp() {
           </div>
         );
       default:
-        return <ChatPanel
-          messages={messages}
-          inputValue={inputValue}
-          setInputValue={setInputValue}
-          isLoading={isLoading}
-          onSendMessage={handleSendMessage}
-          pendingConfirmation={pendingConfirmation}
-          onConfirmation={handleConfirmation}
-        />;
+        return (
+          <ChatPanel
+            messages={messages}
+            inputValue={inputValue}
+            setInputValue={setInputValue}
+            isLoading={isLoading}
+            onSendMessage={handleSendMessage}
+            pendingConfirmation={pendingConfirmation}
+            onConfirmation={handleConfirmation}
+          />
+        );
     }
   };
 
@@ -190,18 +283,20 @@ export default function NewApp() {
       }}
     >
       <Layout style={{ height: '100vh', background: '#fff' }}>
-        <Header style={{ 
-          background: '#fff', 
-          borderBottom: '1px solid #f0f0f0',
-          padding: '0 16px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }}>
+        <Header
+          style={{
+            background: '#fff',
+            borderBottom: '1px solid #f0f0f0',
+            padding: '0 16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
           <Title level={4} style={{ margin: 0, color: '#1890ff' }}>
             MCP Chrome Extension
           </Title>
-          
+
           <Dropdown
             menu={{
               items: panelMenuItems,
@@ -210,19 +305,13 @@ export default function NewApp() {
             }}
             placement="bottomRight"
           >
-            <Button 
-              type="text" 
-              icon={<MenuOutlined />}
-              style={{ fontSize: '16px' }}
-            >
+            <Button type="text" icon={<MenuOutlined />} style={{ fontSize: '16px' }}>
               切换面板
             </Button>
           </Dropdown>
         </Header>
 
-        <Content style={{ padding: '16px', overflow: 'auto' }}>
-          {renderPanelContent()}
-        </Content>
+        <Content style={{ padding: '16px', overflow: 'auto' }}>{renderPanelContent()}</Content>
       </Layout>
     </ConfigProvider>
   );
